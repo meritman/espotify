@@ -147,8 +147,8 @@ static void handleWiFiPage() {
     "'<div class=\"success\"><h2>WiFi Connected!</h2><p class=\"sub\">Your device is now on the network</p>'"
     "+'<div class=\"ip-box\"><p style=\"color:#888;font-size:.85em\">Access setup at:</p>'"
     "+'<a href=\"http://'+d.ip+'/\" target=\"_blank\">http://'+d.ip+'/</a></div>'"
-    "+'<p style=\"color:#666;font-size:.8em;margin-top:12px\">AP will shut down shortly.<br>Connect to your WiFi and visit the IP above.</p>'"
-    "</div>'}else{document.getElementById('msg').innerHTML="
+    "+'<p style=\"color:#666;font-size:.8em;margin-top:12px\">AP will shut down shortly.<br>Connect to your WiFi and visit the IP above.</p></div>'"
+    "}else{document.getElementById('msg').innerHTML="
     "'<p class=\"err\">'+d.error+'</p>'}}).catch(()=>{document.getElementById('msg').innerHTML="
     "'<p class=\"err\">Connection failed</p>'})}"
     "</script></div></body></html>");
