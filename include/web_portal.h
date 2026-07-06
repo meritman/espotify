@@ -173,7 +173,7 @@ static void handleConnect() {
   WiFi.begin(ssid.c_str(), pass.c_str());
 
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
     delay(500);
     attempts++;
   }
@@ -466,9 +466,16 @@ static void handleOTACheck() {
   }
   WiFiClientSecure client;
   client.setInsecure();
+  client.setTimeout(10000); // 10s for TLS handshake
   HTTPClient http;
+  http.setTimeout(10000);
   http.begin(client, "https://raw.githubusercontent.com/meritman/espotify/main/version.json");
+  
   int code = http.GET();
+  if (code < 0) {
+    delay(500); // Wait half a second and retry
+    code = http.GET();
+  }
   if (code == 200) {
     DynamicJsonDocument doc(1024);
     deserializeJson(doc, http.getStream());
@@ -502,16 +509,27 @@ static void handleOTAInstall() {
   
   WiFiClientSecure client;
   client.setInsecure();
+  client.setTimeout(10000);
   HTTPClient http;
+  http.setTimeout(10000);
   
   http.begin(client, otaUrl);
   int code = http.GET();
+  if (code < 0) {
+    delay(500);
+    code = http.GET();
+  }
+  
   if (code == 200 || code == 301 || code == 302) {
     if (code == 301 || code == 302) {
       otaUrl = http.getLocation();
       http.end();
       http.begin(client, otaUrl);
       code = http.GET();
+      if (code < 0) {
+        delay(500);
+        code = http.GET();
+      }
     }
   }
 
