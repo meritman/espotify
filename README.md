@@ -1,15 +1,15 @@
-# ESPotify 🎵
+# ESPotify 
 
 ESPotify is a smart desktop display that connects to your Spotify account and beautifully renders your currently playing track, artist name, album art, and live synced lyrics directly onto a small TFT LCD screen! It features a built-in Captive Portal for extremely easy Wi-Fi and Spotify credential setup.
 
-## ✨ Features
+##  Features
 - **Live Album Art & Metadata**: Instantly updates when a new song plays on your Spotify account.
 - **Synced Lyrics**: Displays live lyrics synchronized to the song (disappears when the music is paused).
 - **Captive Portal Setup**: No hardcoding needed! Connect to the `ESPotify-Setup` Wi-Fi network to enter your credentials securely from your phone.
 - **Web Control Panel**: Change screen brightness, set a screen timeout, and restart the device from your browser.
 - **Over-The-Air (OTA) Updates**: Easily update your ESPotify firmware to the latest version directly from the Web Control Panel without plugging it into a PC.
 
-## 🛠️ Components Used
+##  Components Used
 To build this project, you only need two main components:
 1. **ESP32 Dev Module** (Standard 240MHz, 4MB Flash)
 2. **1.8" TFT LCD Display (SPI)** (Uses the ST7735 driver chip)
@@ -17,7 +17,7 @@ To build this project, you only need two main components:
 > [!WARNING]
 > **Disclaimer:** This firmware is currently designed and optimized **only for the 1.8 inch TFT LCD Display (ST7735)**. Using it with other displays (like ILI9341 or SSD1306) will result in broken graphics or a white screen. In the future, I will try to add support for other displays!
 
-## 🔌 Wiring Guide (recommended)
+##  Wiring Guide (recommended)
 
 Connect the 1.8" TFT display to your ESP32 using the following pins:
 
@@ -32,12 +32,13 @@ Connect the 1.8" TFT display to your ESP32 using the following pins:
 | **SCK (SCL)** | GPIO 18 | SPI Clock |
 | **LED / BL** | GPIO 22 | Backlight Control |
 
-## 🚀 Installation & Usage
+##  Installation & Usage
 
 ### 1. Flash the Firmware
 - Download the latest **`espotifyvX.X.X-pre_merged.bin`** file from the [Releases](https://github.com/meritman/espotify/releases) page.
 - Connect your ESP32 to your PC via USB.
-- Go to an ESP Web Flasher (like [espboards.dev/tools/program](https://www.espboards.dev/tools/program/)) and flash the merged `.bin` file at offset `0x0`.
+- Go to an ESP Web Flasher https://espflash.app/
+- or ( [espboards.dev/tools/program](https://www.espboards.dev/tools/program/)) and flash the merged `.bin` file at offset `0x0`.
 
 ### 2. Connect to Wi-Fi
 - Once flashed, the ESP32 will reboot and create a Wi-Fi network called **`ESPotify-Setup`**.
