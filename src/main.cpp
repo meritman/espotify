@@ -100,9 +100,7 @@ bool fadeDirectionIn = false;
 String targetLyric1 = "";
 String targetLyric2 = "";
 
-// ��═══════════════════════════════════════════
 //  Prototypes
-// ��═══════════════════════════════════════════
 void refreshSpotifyToken();
 void pollSpotifyAPI();
 void fetchLyrics(String track, String artist);
@@ -211,7 +209,6 @@ void setup() {
   NVStore::load();
 
   if (!NVStore::hasWiFi()) {
-// PHASE 1: No WiFi → AP Captive Portal
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextFont(2);
     tft.drawString("ESPotify", 10, 10);
@@ -243,7 +240,7 @@ void setup() {
   }
   
   if (WiFi.status() != WL_CONNECTED) {
-    // WiFi failed — fall back to AP mode
+    // WiFi failedfall back to AP mode
     tft.fillScreen(TFT_BLACK);
     tft.setTextColor(0xF800, TFT_BLACK);
     tft.drawString("WiFi Failed!", 10, 10);
@@ -276,8 +273,6 @@ void setup() {
     Serial.println("[Boot] No Spotify creds → serving setup page");
     return;  // Don't start Spotify task yet
   }
-
-// PHASE 3: All Good → Normal Operation
   delay(1000);
 
   // Start web server for controls
@@ -536,7 +531,7 @@ void fetchLyrics(String track, String artist) {
   http.setUserAgent("LrcSyncerESP32/1.0 (https://github.com/shravanpanakkal)");
   http.addHeader("Accept", "application/json");
   http.addHeader("Connection", "close"); // Force server to close connection immediately to prevent -11 timeouts
-  http.setTimeout(8000);
+  http.setTimeout(15000);
   int httpCode = http.GET();
   
   if (httpCode == 200) {
