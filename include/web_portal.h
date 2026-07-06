@@ -167,6 +167,8 @@ static void handleConnect() {
   }
 
   // Try connecting in STA mode while keeping AP alive
+  WiFi.disconnect(true);
+  delay(100);
   WiFi.mode(WIFI_AP_STA);
   WiFi.begin(ssid.c_str(), pass.c_str());
 
