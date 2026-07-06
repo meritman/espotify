@@ -11,7 +11,7 @@
 
 // Web Portal (Captive Portal + Setup + Controls)
 
-const char* CURRENT_VERSION = "1.0.0";
+const char* CURRENT_VERSION = "v1.1.0-pre";
 
 // Forward declarations from main (global scope)
 extern String base64Encode(String text);
@@ -361,10 +361,26 @@ static void handleControlPanel() {
     "function checkOTA(){"
     "let b=document.getElementById('otaBtn');b.textContent='Checking...';"
     "fetch('/ota_check').then(r=>r.json()).then(d=>{"
-    "if(d.ok){if(d.update){b.textContent='Updating... Do not unplug!';fetch('/ota_install');setTimeout(()=>location.reload(),35000)}"
-    "else{b.textContent='Up to Date';setTimeout(()=>b.textContent='Check for Updates',3000)}}"
-    "else{b.textContent='Error';setTimeout(()=>b.textContent='Check for Updates',3000)}"
+    "if(d.ok){"
+    "  let h='';"
+    "  if(d.stable_ver){"
+    "    if(d.stable_ver===d.current) h+='<p class=\"ok\">Stable is up to date ('+d.stable_ver+')</p>';"
+    "    else h+='<button class=\"btn\" onclick=\"doOTA(\\''+d.stable_url+'\\')\">Flash Stable ('+d.stable_ver+')</button>';"
+    "  }"
+    "  if(d.pre_ver){"
+    "    if(d.pre_ver===d.current) h+='<p class=\"ok\">Pre-release is up to date ('+d.pre_ver+')</p>';"
+    "    else h+='<button class=\"btn sec\" onclick=\"doOTA(\\''+d.pre_url+'\\')\">Flash Pre-release ('+d.pre_ver+')</button>';"
+    "  }"
+    "  if(h==='') h='<p>No updates found.</p>';"
+    "  b.outerHTML='<div id=\"otaOpts\">'+h+'</div>';"
+    "}else{b.textContent='Error';setTimeout(()=>b.textContent='Check for Updates',3000);}"
     "}).catch(()=>{b.textContent='Error';setTimeout(()=>b.textContent='Check for Updates',3000)})}"
+    "function doOTA(url){"
+    "let o=document.getElementById('otaOpts')||document.getElementById('otaBtn');"
+    "o.innerHTML='<button class=\"btn sec\">Updating... Do not unplug!</button>';"
+    "fetch('/ota_install?url='+encodeURIComponent(url));"
+    "setTimeout(()=>location.reload(),35000);"
+    "}"
     "function poll(){fetch('/status').then(r=>r.json()).then(d=>{upd(d);document.getElementById('tout').value=d.timeout||0;tvUp();document.getElementById('bright').value=d.brightness||255;bvUp();document.getElementById('wpin').value=d.wakepin}).catch(()=>{})}"
     "poll();setInterval(poll,3000);"
     "</script></div></body></html>");
@@ -454,14 +470,17 @@ static void handleOTACheck() {
   if (code == 200) {
     DynamicJsonDocument doc(1024);
     deserializeJson(doc, http.getStream());
-    String ver = doc["version"].as<String>();
-    otaUrl = doc["url"].as<String>();
     
-    if (ver != CURRENT_VERSION && otaUrl.length() > 0) {
-       server.send(200, "application/json", "{\"ok\":true,\"update\":true}");
-    } else {
-       server.send(200, "application/json", "{\"ok\":true,\"update\":false}");
-    }
+    String stableVer = doc["stable"]["version"] | "";
+    String stableUrl = doc["stable"]["url"] | "";
+    String preVer = doc["pre"]["version"] | "";
+    String preUrl = doc["pre"]["url"] | "";
+    
+    String resp = "{\"ok\":true, \"current\":\"" + String(CURRENT_VERSION) + "\",";
+    resp += "\"stable_ver\":\"" + stableVer + "\", \"stable_url\":\"" + stableUrl + "\",";
+    resp += "\"pre_ver\":\"" + preVer + "\", \"pre_url\":\"" + preUrl + "\"}";
+    
+    server.send(200, "application/json", resp);
   } else {
     server.send(500, "application/json", "{\"ok\":false}");
   }
@@ -469,10 +488,15 @@ static void handleOTACheck() {
 }
 
 static void handleOTAInstall() {
+  String url = server.arg("url");
+  if (url.length() == 0) {
+    server.send(400, "application/json", "{\"ok\":false}");
+    return;
+  }
+  otaUrl = url;
+  
   server.send(200, "application/json", "{\"ok\":true}");
   delay(100);
-  
-  if (otaUrl.length() == 0) return;
   
   WiFiClientSecure client;
   client.setInsecure();
