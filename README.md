@@ -1,6 +1,6 @@
 # ESPotify 
 
-ESPotify is a smart desktop display that connects to your Spotify account and beautifully renders your currently playing track, artist name, album art, and live synced lyrics directly onto a small TFT LCD screen! It features a built-in Captive Portal for extremely easy Wi-Fi and Spotify credential setup.
+ESPotify is a esp32 firmware that connects to your Spotify account and beautifully renders your currently playing track, artist name, album art, and live synced lyrics directly onto a small TFT LCD screen! It features a built-in Captive Portal for extremely easy Wi-Fi and Spotify credential setup.
 
 ##  Features
 - **Live Album Art & Metadata**: Instantly updates when a new song plays on your Spotify account.
