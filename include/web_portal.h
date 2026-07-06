@@ -108,9 +108,12 @@ static void handleWiFiPage() {
 
     for (int i = 0; i < count; i++) {
       int bars = (nets[i].rssi > -50) ? 4 : (nets[i].rssi > -65) ? 3 : (nets[i].rssi > -75) ? 2 : 1;
-      html += F("<div class='net' onclick=\"sel('");
-      html += nets[i].ssid;
-      html += F("')\">");
+      html += F("<div class='net' role='button' onclick=\"sel(this)\" data-ssid=\"");
+      // Basic HTML escape for quotes just in case
+      String safeSsid = nets[i].ssid;
+      safeSsid.replace("\"", "&quot;");
+      html += safeSsid;
+      html += F("\">");
       html += F("<div><div class='name'>");
       html += nets[i].ssid;
       html += F("</div><div class='db'>");
@@ -135,8 +138,8 @@ static void handleWiFiPage() {
     "<button onclick='go()'>Connect</button>"
     "<p id='msg'></p></div>"
     "<script>"
-    "function sel(s){document.getElementById('ssid').value=s;document.getElementById('sn').textContent=s;"
-    "document.getElementById('pw').style.display='block';document.getElementById('pass').focus()}"
+    "function sel(e){var s=e.getAttribute('data-ssid');document.getElementById('ssid').value=s;document.getElementById('sn').textContent=s;"
+    "document.getElementById('pw').style.display='block';}"
     "function go(){var s=document.getElementById('ssid').value,p=document.getElementById('pass').value;"
     "document.getElementById('msg').innerHTML='<p class=\"loading\">Connecting...</p>';"
     "fetch('/connect?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p))"
