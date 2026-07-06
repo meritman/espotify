@@ -9,9 +9,7 @@
 
 #include <Update.h>
 
-// ═══════════════════════════════════════════
-//  Web Portal — Captive Portal + Setup + Controls
-// ═══════════════════════════════════════════
+// Web Portal (Captive Portal + Setup + Controls)
 
 const char* CURRENT_VERSION = "1.0.0";
 
@@ -32,7 +30,7 @@ static bool apActive = false;
 static bool setupComplete = false;
 static String assignedIP = "";
 
-// ─── Shared CSS ──────────────────────────────
+// Shared CSS
 static const char CSS[] PROGMEM = R"rawCSS(
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',system-ui,sans-serif;background:#0d0d0d;color:#e0e0e0;min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:16px}
@@ -80,7 +78,7 @@ label{font-size:.85em;color:#aaa;margin-top:10px;display:block}
 .sep{border:none;border-top:1px solid #222;margin:20px 0}
 )rawCSS";
 
-// ─── WiFi Scan Page ─────────────────────────
+// WiFi Scan Page
 static void handleWiFiPage() {
   int n = WiFi.scanNetworks();
   String html = F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>ESPotify Setup</title><style>");
@@ -155,7 +153,7 @@ static void handleWiFiPage() {
   server.send(200, "text/html", html);
 }
 
-// ─── WiFi Connect Handler ───────────────────
+// WiFi Connect Handler
 static void handleConnect() {
   String ssid = server.arg("ssid");
   String pass = server.arg("pass");
@@ -191,7 +189,7 @@ static void handleConnect() {
   }
 }
 
-// ─── Spotify Setup Page ─────────────────────
+// Spotify Setup Page
 static void handleSpotifySetup() {
   String html = F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>ESPotify - Spotify Setup</title><style>");
   html += FPSTR(CSS);
@@ -245,7 +243,7 @@ static void handleSpotifySetup() {
   server.send(200, "text/html", html);
 }
 
-// ─── Spotify Token Exchange Handler ─────────
+// Spotify Token Exchange Handler
 static void handleSpotifySave() {
   String cid   = server.arg("cid");
   String csec  = server.arg("csec");
@@ -308,7 +306,7 @@ static void handleSpotifySave() {
   }
 }
 
-// ─── Control Panel Page ─────────────────────
+// Control Panel Page
 static void handleControlPanel() {
   String html = F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>ESPotify - Controls</title><style>");
   html += FPSTR(CSS);
@@ -371,7 +369,7 @@ static void handleControlPanel() {
   server.send(200, "text/html", html);
 }
 
-// ─── Brightness Handler ─────────────────────
+// Brightness Handler
 static void handleBrightness() {
   uint8_t val = server.arg("v").toInt();
   if (val < 10) val = 10;  // minimum brightness
@@ -380,7 +378,7 @@ static void handleBrightness() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
-// ─── Status Handler (for polling) ───────────
+// Status Handler (for polling)
 static void handleStatus() {
   String json = "{";
   json += "\"track\":\"" + String(::spotify.title) + "\",";
@@ -393,7 +391,7 @@ static void handleStatus() {
   server.send(200, "application/json", json);
 }
 
-// ─── Timeout Save Handler ───────────────────
+// Timeout Save Handler
 static void handleTimeout() {
   uint16_t val = server.arg("v").toInt();
   NVStore::saveScreenTimeout(val);
@@ -401,7 +399,7 @@ static void handleTimeout() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
-// ─── Factory Reset Handler ──────────────────
+// Factory Reset Handler
 static void handleReset() {
   NVStore::clearAll();
   String html = F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><style>");
@@ -417,27 +415,27 @@ static void handleReset() {
   ESP.restart();
 }
 
-// --- Restart Handler ---
+// Restart Handler
 static void handleRestart() {
   server.send(200, "application/json", "{\"ok\":true}");
   delay(500);
   ESP.restart();
 }
 
-// --- Wake Pin Handler ---
+// Wake Pin Handler
 static void handleWakePin() {
   uint8_t pin = server.arg("v").toInt();
   NVStore::saveWakePin(pin);
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
-// --- Wake Display Handler ---
+// Wake Display Handler
 static void handleWake() {
   ::wakeScreen();
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
-// --- OTA Handlers ---
+// OTA Handlers
 static String otaUrl = "";
 
 static void handleOTACheck() {
@@ -505,7 +503,7 @@ static void handleOTAInstall() {
   http.end();
 }
 
-// ─── Captive Portal Redirect ────────────────
+// Captive Portal Redirect
 static void handleNotFound() {
   if (apActive) {
     server.sendHeader("Location", "http://192.168.4.1/", true);
@@ -515,7 +513,7 @@ static void handleNotFound() {
   }
 }
 
-// ─── Root Router ────────────────────────────
+// Root Router
 static void handleRoot() {
   if (!NVStore::hasWiFi() || apActive) {
     handleWiFiPage();
@@ -526,9 +524,7 @@ static void handleRoot() {
   }
 }
 
-// ═══════════════════════════════════════════
-//  Public API
-// ═══════════════════════════════════════════
+// Public API
 
 inline void startAP() {
   WiFi.mode(WIFI_AP);

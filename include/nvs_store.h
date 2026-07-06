@@ -1,10 +1,8 @@
 #pragma once
 #include <Preferences.h>
 
-// ═══════════════════════════════════════════
-//  NVS Credential Store
-//  Persists WiFi + Spotify creds across reboots
-// ═══════════════════════════════════════════
+// NVS Credential Store
+// Persists WiFi + Spotify creds across reboots
 
 namespace NVStore {
 

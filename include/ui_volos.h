@@ -30,9 +30,7 @@ inline void drawGrid(uint16_t accentColor) {
 }
 
 
-// ════════════════════════════════════════════
-//  Page 2: Spotify
-// ════════════════════════════════════════════
+// Spotify UI Draw
 extern uint16_t albumArt[15616];
 
 inline void drawSpotify(const SpotifyData &d) {

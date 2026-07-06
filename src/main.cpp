@@ -16,9 +16,7 @@ SemaphoreHandle_t uiMutex;
 String spotifyAccessToken = "";
 uint32_t tokenExpirationTime = 0;
 
-// ════════════════════════════════════════════
-//  Globals
-// ════════════════════════════════════════════
+// Globals
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite sprite = TFT_eSprite(&tft);
 
@@ -26,22 +24,22 @@ TFT_eSprite sprite = TFT_eSprite(&tft);
 
 SpotifyData spotify   = {};
 
-// --- Smooth progress & lyrics interpolation ---
+// Smooth progress & lyrics interpolation
 unsigned long lastProgressUpdateMillis = 0;
 int lastKnownProgressMs = 0;
 int lastKnownDurationMs = 0;
-// ----------------------------------------------
+// 
 
 uint32_t lastUpdate    = 0;
 bool     forceRedraw   = true;
 
 uint16_t albumArt[15616] = {0}; // 128x122 buffer for background cover art
 
-// --- Screen Timeout ---
+// Screen Timeout
 uint32_t lastMusicActivityMs = 0;  // tracks when music was last playing
 bool     screenOff = false;
 
-// --- Factory Reset Button ---
+// Factory Reset Button
 #define RESET_BTN_PIN  12
 #define RESET_HOLD_MS  3000
 uint32_t btnPressStart = 0;
@@ -102,9 +100,9 @@ bool fadeDirectionIn = false;
 String targetLyric1 = "";
 String targetLyric2 = "";
 
-// ════════════════════════════════════════════
+// ��═══════════════════════════════════════════
 //  Prototypes
-// ════════════════════════════════════════════
+// ��═══════════════════════════════════════════
 void refreshSpotifyToken();
 void pollSpotifyAPI();
 void fetchLyrics(String track, String artist);
@@ -120,9 +118,7 @@ inline void blWrite(uint8_t val) {
 #endif
 }
 
-// ════════════════════════════════════════════
-//  Base64 Helper
-// ════════════════════════════════════════════
+// External Assets
 const char b64_alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 String base64Encode(String text) {
   String encoded = "";
@@ -155,9 +151,7 @@ String base64Encode(String text) {
 // Include web portal after base64Encode and spotifyAccessToken are defined
 #include "web_portal.h"
 
-// ════════════════════════════════════════════
-//  Screen Timeout
-// ════════════════════════════════════════════
+// Screen Timeout
 void applyScreenTimeout(uint16_t seconds) {
   // Just save the value - actual timeout logic runs in loop()
   lastMusicActivityMs = millis();
@@ -182,9 +176,7 @@ void wakeScreen() {
   lastMusicActivityMs = millis();
 }
 
-// ════════════════════════════════════════════
-//  Setup — NVS-Driven Boot Flow
-// ════════════════════════════════════════════
+// Setup - NVS-Driven Boot Flow
 static uint32_t apShutdownTime = 0;
 static bool spotifyTaskStarted = false;
 
@@ -215,11 +207,11 @@ void setup() {
 
   sprite.createSprite(128, 160);
 
-  // ─── Load NVS Credentials ────────────────
+// Load NVS Credentials
   NVStore::load();
 
   if (!NVStore::hasWiFi()) {
-    // ──── PHASE 1: No WiFi → AP Captive Portal ────
+// PHASE 1: No WiFi → AP Captive Portal
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextFont(2);
     tft.drawString("ESPotify", 10, 10);
@@ -238,7 +230,7 @@ void setup() {
     return;  // Don't start Spotify task yet
   }
 
-  // ──── WiFi Credentials Exist → Connect ────
+// WiFi Credentials Exist → Connect
   tft.setTextColor(TFT_WHITE);
   tft.drawString("WiFi...", 10, 10);
   
@@ -273,7 +265,7 @@ void setup() {
   tft.println(WiFi.localIP());
 
   if (!NVStore::hasSpotify()) {
-    // ──── PHASE 2: WiFi OK but no Spotify → Setup Page ────
+// PHASE 2: WiFi OK but no Spotify → Setup Page
     tft.setTextColor(0x07E0, TFT_BLACK);
     tft.println("");
     tft.println("Visit to setup:");
@@ -285,7 +277,7 @@ void setup() {
     return;  // Don't start Spotify task yet
   }
 
-  // ──── PHASE 3: All Good → Normal Operation ────
+// PHASE 3: All Good → Normal Operation
   delay(1000);
 
   // Start web server for controls
@@ -315,16 +307,14 @@ void setup() {
   spotifyTaskStarted = true;
 }
 
-// ════════════════════════════════════════════
-//  Loop
-// ════════════════════════════════════════════
+// Loop
 void loop() {
   uint32_t now = millis();
 
-  // ─── Web Server (always runs) ─────────────
+// Web Server (always runs)
   Portal::loop();
 
-  // ─── AP Auto-Shutdown after WiFi connect ──
+// AP Auto-Shutdown after WiFi connect
   if (Portal::setupComplete && Portal::apActive) {
     if (apShutdownTime == 0) {
       apShutdownTime = now + 5000;  // 5 seconds
@@ -341,7 +331,7 @@ void loop() {
     }
   }
 
-  // ─── Start Spotify task when creds become available ──
+// Start Spotify task when creds become available
   if (!spotifyTaskStarted && NVStore::hasSpotify() && WiFi.status() == WL_CONNECTED) {
     tft.fillScreen(TFT_BLACK);
     tft.setTextColor(0x07E0, TFT_BLACK);
@@ -355,12 +345,12 @@ void loop() {
     spotifyTaskStarted = true;
   }
 
-  // ─── If Spotify not configured, skip rendering ──
+// If Spotify not configured, skip rendering
   if (!spotifyTaskStarted) {
     return;
   }
 
-  // ─── Factory Reset: Long-Press Button ─────
+// Factory Reset: Long-Press Button
   if (digitalRead(RESET_BTN_PIN) == LOW) {
     if (!btnWasPressed) {
       btnWasPressed = true;
@@ -384,7 +374,7 @@ void loop() {
     btnWasPressed = false;
   }
 
-  // --- Screen Timeout (based on music activity) ---
+// Screen Timeout (based on music activity)
   if (NVStore::creds.screenTimeout > 0 && !screenOff) {
     // Only sleep if music is NOT playing AND timeout elapsed
     if (!spotify.isPlaying) {
@@ -400,7 +390,7 @@ void loop() {
     }
   }
 
-  // --- Wake button check ---
+// Wake button check
   if (screenOff) {
     uint8_t wPin = NVStore::creds.wakePin;
     if (digitalRead(wPin) == LOW) {
@@ -408,10 +398,10 @@ void loop() {
     }
   }
 
-  // ─── Spotify UI Rendering ─────────────────
+// Spotify UI Rendering
   if (screenOff) return;  // Skip rendering when screen is off
   
-  // --- Real-time Spotify Progress Interpolation & Lyric Checking ---
+// Real-time Spotify Progress Interpolation & Lyric Checking
   if (lastKnownDurationMs > 0) {
     int interpolated = lastKnownProgressMs + (now - lastProgressUpdateMillis);
     if (interpolated > lastKnownDurationMs) {
@@ -422,7 +412,7 @@ void loop() {
     // Check and trigger line transitions immediately on the interpolated timer
     updateSyncedLyric(); 
   }
-  // -----------------------------------------------------------------
+// 
 
   xSemaphoreTake(uiMutex, portMAX_DELAY);
   
@@ -472,9 +462,7 @@ void loop() {
   xSemaphoreGive(uiMutex);
 }
 
-// ════════════════════════════════════════════
-//  LRC Parsing Logic
-// ════════════════════════════════════════════
+// LRC Parsing Logic
 String urlEncode(String str) {
   String encodedString = "";
   encodedString.reserve(str.length() * 3 + 1);
@@ -658,9 +646,7 @@ void updateSyncedLyric() {
   }
 }
 
-// ════════════════════════════════════════════
-//  Spotify API Calls
-// ════════════════════════════════════════════
+// Spotify Token Logic
 void refreshSpotifyToken() {
   if (WiFi.status() != WL_CONNECTED) return;
   
@@ -819,11 +805,11 @@ void pollSpotifyAPI() {
           spotify.progressMs = doc["progress_ms"].as<uint32_t>();
           spotify.durationMs = doc["item"]["duration_ms"].as<uint32_t>();
           
-          // --- Sync Interpolation Anchors on Valid Network Metric ---
+// Sync Interpolation Anchors on Valid Network Metric
           lastKnownProgressMs = spotify.progressMs;
           lastKnownDurationMs = spotify.durationMs;
           lastProgressUpdateMillis = millis();
-          // -----------------------------------------------------------
+// 
           
           // Flag for lyric fetch after closing Spotify connection
           if (title != currentTrackForLyrics) {
@@ -911,9 +897,7 @@ void pollSpotifyAPI() {
   forceRedraw = true;
 }
 
-// ════════════════════════════════════════════
-//  FreeRTOS Task (Core 0)
-// ════════════════════════════════════════════
+// FreeRTOS Task (Core 0)
 void spotifyTask(void *pvParameters) {
   while (true) {
     pollSpotifyAPI();
