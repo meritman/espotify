@@ -17,7 +17,7 @@ To build this project, you only need two main components:
 > [!WARNING]
 > **Disclaimer:** This firmware is currently designed and optimized **only for the 1.8 inch TFT LCD Display (ST7735)**. Using it with other displays (like ILI9341 or SSD1306) will result in broken graphics or a white screen. In the future, I will try to add support for other displays!
 
-## 🔌 Wiring Guide
+## 🔌 Wiring Guide (recommended)
 
 Connect the 1.8" TFT display to your ESP32 using the following pins:
 
