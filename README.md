@@ -1,5 +1,5 @@
 # ESPotify 
-
+(Requires spotify premium!!!)
 ESPotify is a esp32 firmware that connects to your Spotify account and beautifully renders your currently playing track, artist name, album art, and live synced lyrics directly onto a small TFT LCD screen! It features a built-in Captive Portal for extremely easy Wi-Fi and Spotify credential setup.
 
 ##  Features
