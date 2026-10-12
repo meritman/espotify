@@ -11,7 +11,7 @@
 
 // Web Portal (Captive Portal + Setup + Controls)
 
-const char* CURRENT_VERSION = "v1.1.0-pre";
+const char* CURRENT_VERSION = "v1.1.1-pre";
 
 // Forward declarations from main (global scope)
 extern String base64Encode(String text);

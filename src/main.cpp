@@ -87,11 +87,12 @@ bool tjpg_callback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitma
 }
 
 // LRC Sync Globals
+#define MAX_LYRICS 180
 struct LyricLine {
   uint32_t timeMs;
   String text;
 };
-LyricLine lyrics[100];
+LyricLine lyrics[MAX_LYRICS];
 int numLyrics = 0;
 String currentTrackForLyrics = "";
 
@@ -103,7 +104,7 @@ String targetLyric2 = "";
 //  Prototypes
 void refreshSpotifyToken();
 void pollSpotifyAPI();
-void fetchLyrics(String track, String artist);
+void fetchLyrics(String track, String artist, String album = "", uint32_t durationMs = 0);
 void updateSyncedLyric();
 void spotifyTask(void *pvParameters);
 void applyScreenTimeout(uint16_t seconds);
@@ -457,31 +458,307 @@ void loop() {
   xSemaphoreGive(uiMutex);
 }
 
-// LRC Parsing Logic
-String urlEncode(String str) {
+// LRC Parsing & Sanitization Logic
+String urlEncode(const String& str) {
   String encodedString = "";
-  encodedString.reserve(str.length() * 3 + 1);
-  char c, code0, code1;
-  for (int i = 0; i < str.length(); i++) {
-    c = str.charAt(i);
-    if (isalnum(c)) {
-      encodedString += c;
+  encodedString.reserve(str.length() * 3);
+  const char hexChars[] = "0123456789ABCDEF";
+  for (size_t i = 0; i < str.length(); i++) {
+    uint8_t c = (uint8_t)str.charAt(i);
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+        c == '-' || c == '_' || c == '.' || c == '~') {
+      encodedString += (char)c;
     } else {
-      code1 = (c & 0xf) + '0';
-      if ((c & 0xf) > 9) code1 = (c & 0xf) - 10 + 'A';
-      c = (c >> 4) & 0xf;
-      code0 = c + '0';
-      if (c > 9) code0 = c - 10 + 'A';
       encodedString += '%';
-      encodedString += code0;
-      encodedString += code1;
+      encodedString += hexChars[(c >> 4) & 0x0F];
+      encodedString += hexChars[c & 0x0F];
     }
   }
   return encodedString;
 }
 
+String cleanTrackTitle(String title) {
+  // Normalize quotes and dashes
+  title.replace("’", "'");
+  title.replace("`", "'");
+  title.replace("“", "\"");
+  title.replace("”", "\"");
+  title.replace("–", "-");
+  title.replace("—", "-");
+
+  // Cut common suffixes like " - Remastered", " - Live", " - Radio Edit", etc.
+  int dashIdx = title.indexOf(" - ");
+  if (dashIdx != -1) {
+    String suffix = title.substring(dashIdx + 3);
+    suffix.toLowerCase();
+    if (suffix.indexOf("remaster") != -1 ||
+        suffix.indexOf("live") != -1 ||
+        suffix.indexOf("radio edit") != -1 ||
+        suffix.indexOf("single version") != -1 ||
+        suffix.indexOf("bonus") != -1 ||
+        suffix.indexOf("deluxe") != -1 ||
+        suffix.indexOf("mix") != -1 ||
+        suffix.indexOf("version") != -1 ||
+        suffix.indexOf("feat") != -1 ||
+        suffix.indexOf("anniversary") != -1) {
+      title = title.substring(0, dashIdx);
+    }
+  }
+
+  // Remove feat/with/version inside brackets e.g. "(feat. ...)" or "[feat. ...]"
+  auto stripPattern = [](String& str, const char* openB, const char* closeB) {
+    int openIdx = str.indexOf(openB);
+    while (openIdx != -1) {
+      int closeIdx = str.indexOf(closeB, openIdx);
+      if (closeIdx != -1) {
+        String inside = str.substring(openIdx + 1, closeIdx);
+        inside.toLowerCase();
+        if (inside.indexOf("feat") != -1 ||
+            inside.indexOf("with ") != -1 ||
+            inside.indexOf("remaster") != -1 ||
+            inside.indexOf("live") != -1 ||
+            inside.indexOf("bonus") != -1 ||
+            inside.indexOf("version") != -1) {
+          str = str.substring(0, openIdx) + str.substring(closeIdx + 1);
+          str.trim();
+          openIdx = str.indexOf(openB);
+          continue;
+        }
+      }
+      openIdx = str.indexOf(openB, openIdx + 1);
+    }
+  };
+
+  stripPattern(title, "(", ")");
+  stripPattern(title, "[", "]");
+
+  title.trim();
+  return title;
+}
+
+String cleanArtistName(String artist) {
+  int featIdx = artist.indexOf(" feat.");
+  if (featIdx == -1) featIdx = artist.indexOf(" ft.");
+  if (featIdx != -1) {
+    artist = artist.substring(0, featIdx);
+  }
+  artist.trim();
+  return artist;
+}
+
+void parseLrc(const String& lrc) {
+  numLyrics = 0;
+  int pos = 0;
+  int len = lrc.length();
+
+  while (pos < len && numLyrics < MAX_LYRICS) {
+    int nextLine = lrc.indexOf('\n', pos);
+    if (nextLine == -1) nextLine = len;
+
+    String line = lrc.substring(pos, nextLine);
+    pos = nextLine + 1;
+    line.trim();
+    if (line.length() == 0) continue;
+
+    // Line might have multiple timestamp tags: [00:10.00][00:20.00]Chorus
+    int textStart = 0;
+    uint32_t timestamps[8];
+    int tsCount = 0;
+
+    int scanIdx = 0;
+    while (scanIdx < line.length() && line[scanIdx] == '[') {
+      int closeBracket = line.indexOf(']', scanIdx);
+      if (closeBracket == -1) break;
+
+      String tag = line.substring(scanIdx + 1, closeBracket);
+      tag.trim();
+
+      // Check if tag is timestamp: e.g. "01:23.45" or "01:23" or "1:23.456"
+      int colonIdx = tag.indexOf(':');
+      if (colonIdx > 0 && tsCount < 8) {
+        String minStr = tag.substring(0, colonIdx);
+        String secRest = tag.substring(colonIdx + 1);
+        int dotIdx = secRest.indexOf('.');
+        if (dotIdx == -1) dotIdx = secRest.indexOf(':');
+
+        String secStr = (dotIdx != -1) ? secRest.substring(0, dotIdx) : secRest;
+        String fracStr = (dotIdx != -1) ? secRest.substring(dotIdx + 1) : "";
+
+        bool validTs = true;
+        for (size_t c = 0; c < minStr.length(); c++) {
+          if (!isDigit(minStr[c])) validTs = false;
+        }
+        for (size_t c = 0; c < secStr.length(); c++) {
+          if (!isDigit(secStr[c])) validTs = false;
+        }
+
+        if (validTs && minStr.length() > 0 && secStr.length() > 0) {
+          uint32_t m = minStr.toInt();
+          uint32_t s = secStr.toInt();
+          uint32_t ms = 0;
+          if (fracStr.length() == 1) {
+            ms = fracStr.toInt() * 100;
+          } else if (fracStr.length() == 2) {
+            ms = fracStr.toInt() * 10;
+          } else if (fracStr.length() >= 3) {
+            ms = fracStr.substring(0, 3).toInt();
+          }
+
+          timestamps[tsCount++] = (m * 60000) + (s * 1000) + ms;
+          textStart = closeBracket + 1;
+        }
+      }
+      scanIdx = closeBracket + 1;
+      while (scanIdx < line.length() && line[scanIdx] == ' ') scanIdx++;
+    }
+
+    if (tsCount > 0) {
+      String lyricText = "";
+      if (textStart < line.length()) {
+        lyricText = line.substring(textStart);
+        lyricText.trim();
+      }
+      for (int t = 0; t < tsCount && numLyrics < MAX_LYRICS; t++) {
+        lyrics[numLyrics].timeMs = timestamps[t];
+        lyrics[numLyrics].text = lyricText;
+        numLyrics++;
+      }
+    }
+  }
+
+  // Sort timestamps in ascending order if multi-timestamp tags were present
+  for (int i = 0; i < numLyrics - 1; i++) {
+    for (int j = i + 1; j < numLyrics; j++) {
+      if (lyrics[j].timeMs < lyrics[i].timeMs) {
+        LyricLine tmp = lyrics[i];
+        lyrics[i] = lyrics[j];
+        lyrics[j] = tmp;
+      }
+    }
+  }
+}
+
+int executeLrclibGet(const String& url, String& responseBody) {
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setHandshakeTimeout(12000);
+
+  HTTPClient http;
+  http.begin(client, url);
+  http.setUserAgent("ESPotify/1.0.0 (https://github.com/meritman/espotify)");
+  http.addHeader("X-User-Agent", "ESPotify/1.0.0 (https://github.com/meritman/espotify)");
+  http.addHeader("Lrclib-Client", "ESPotify/1.0.0 (https://github.com/meritman/espotify)");
+  http.addHeader("Accept", "application/json");
+  http.addHeader("Connection", "close");
+  http.setTimeout(12000);
+
+  const char* headerKeys[] = {"Retry-After"};
+  http.collectHeaders(headerKeys, 1);
+
+  int code = http.GET();
+
+  // Handle 503 ServerOverloaded (retry once per LRCLIB documentation)
+  if (code == 503) {
+    String retryAfter = http.header("Retry-After");
+    int waitMs = retryAfter.toInt() * 1000;
+    if (waitMs <= 0 || waitMs > 3000) waitMs = 1000;
+    http.end();
+    delay(waitMs);
+
+    http.begin(client, url);
+    http.setUserAgent("ESPotify/1.0.0 (https://github.com/meritman/espotify)");
+    http.addHeader("X-User-Agent", "ESPotify/1.0.0 (https://github.com/meritman/espotify)");
+    http.addHeader("Lrclib-Client", "ESPotify/1.0.0 (https://github.com/meritman/espotify)");
+    http.addHeader("Accept", "application/json");
+    http.addHeader("Connection", "close");
+    http.setTimeout(12000);
+    code = http.GET();
+  }
+
+  if (code == 200) {
+    responseBody = http.getString();
+  }
+  http.end();
+  return code;
+}
+
+bool parseGetResult(const String& body, bool& isInstrumental) {
+  isInstrumental = false;
+  StaticJsonDocument<384> filter;
+  filter["instrumental"] = true;
+  filter["syncedLyrics"] = true;
+
+  DynamicJsonDocument doc(6144);
+  DeserializationError err = deserializeJson(doc, body, DeserializationOption::Filter(filter));
+  if (err) return false;
+
+  if (doc["instrumental"] == true) {
+    isInstrumental = true;
+    return true;
+  }
+
+  const char* synced = doc["syncedLyrics"];
+  if (synced != nullptr && strlen(synced) >= 10) {
+    parseLrc(String(synced));
+    return (numLyrics > 0);
+  }
+  return false;
+}
+
+bool parseSearchResult(const String& body, uint32_t targetDurationSec, bool& isInstrumental) {
+  isInstrumental = false;
+  StaticJsonDocument<384> filter;
+  filter[0]["instrumental"] = true;
+  filter[0]["syncedLyrics"] = true;
+  filter[0]["duration"] = true;
+
+  DynamicJsonDocument doc(12288);
+  DeserializationError err = deserializeJson(doc, body, DeserializationOption::Filter(filter));
+  if (err || !doc.is<JsonArray>()) return false;
+
+  JsonArray arr = doc.as<JsonArray>();
+  if (arr.size() == 0) return false;
+
+  int bestIdx = -1;
+  float minDurationDiff = 99999.0f;
+  bool foundInst = false;
+
+  for (size_t i = 0; i < arr.size(); i++) {
+    JsonObject item = arr[i];
+    if (item["instrumental"] == true) foundInst = true;
+
+    const char* sLrc = item["syncedLyrics"];
+    if (sLrc != nullptr && strlen(sLrc) >= 10) {
+      if (targetDurationSec > 0) {
+        float itemDur = item["duration"] | 0.0f;
+        float diff = fabs(itemDur - (float)targetDurationSec);
+        if (diff < minDurationDiff) {
+          minDurationDiff = diff;
+          bestIdx = (int)i;
+        }
+      } else if (bestIdx == -1) {
+        bestIdx = (int)i;
+      }
+    }
+  }
+
+  if (bestIdx != -1) {
+    const char* sLrc = arr[bestIdx]["syncedLyrics"];
+    parseLrc(String(sLrc));
+    return (numLyrics > 0);
+  }
+
+  if (foundInst) {
+    isInstrumental = true;
+    return true;
+  }
+
+  return false;
+}
+
 void splitLyric(String text, String &l1, String &l2) {
   l1 = ""; l2 = "";
+  text.trim();
   if (text.length() <= 18) {
     l1 = text;
     return;
@@ -509,96 +786,124 @@ void splitLyric(String text, String &l1, String &l2) {
     l1 = text.substring(0, splitIndex);
     l2 = text.substring(splitIndex + 1);
   }
+  l1.trim();
+  l2.trim();
 }
 
-void fetchLyrics(String track, String artist) {
+void fetchLyrics(String track, String artist, String album, uint32_t durationMs) {
   numLyrics = 0;
+
+  xSemaphoreTake(uiMutex, portMAX_DELAY);
   strcpy(spotify.currentLyric1, "Searching lyrics...");
   strcpy(spotify.currentLyric2, "");
   spotify.lyricAlpha = 255;
   isFadingLyric = false;
+  xSemaphoreGive(uiMutex);
   forceRedraw = true;
-  
-  String encTrack = urlEncode(track);
-  String encArtist = urlEncode(artist);
-  
-  WiFiClientSecure client;
-  client.setInsecure(); // Bypass SSL certificate validation to prevent TLS handshake timeouts
-  client.setHandshakeTimeout(15000); // Give Cloudflare extra time for TLS handshake
-  
-  HTTPClient http;
-  http.begin(client, "https://lrclib.net/api/get?track_name=" + encTrack + "&artist_name=" + encArtist);
-  http.setUserAgent("LrcSyncerESP32/1.0 (https://github.com/shravanpanakkal)");
-  http.addHeader("Accept", "application/json");
-  http.addHeader("Connection", "close"); // Force server to close connection immediately to prevent -11 timeouts
-  http.setTimeout(15000);
-  int httpCode = http.GET();
-  
-  if (httpCode == 200) {
-    StaticJsonDocument<200> filter;
-    filter["syncedLyrics"] = true;
-    
-    DynamicJsonDocument doc(8192);
-    DeserializationError error = deserializeJson(doc, http.getStream(), DeserializationOption::Filter(filter));
-    
-    if (error) {
-      strcpy(spotify.currentLyric1, "Parse Error");
-      strcpy(spotify.currentLyric2, "");
-    } else {
-      String syncedLyrics = doc["syncedLyrics"].as<String>();
-      if (syncedLyrics == "null" || syncedLyrics.length() < 5) {
-        strcpy(spotify.currentLyric1, "No Synced Lyrics");
-        strcpy(spotify.currentLyric2, "");
-        http.end();
-        return;
-      }
-      String lrc = syncedLyrics;
-      int pos = 0;
-      while (pos < lrc.length() && numLyrics < 100) {
-        int nextLine = lrc.indexOf('\n', pos);
-        if (nextLine == -1) nextLine = lrc.length();
-        
-        String line = lrc.substring(pos, nextLine);
-        line.trim();
-        
-        // Parse [MM:SS.xx]
-        if (line.length() > 10 && line[0] == '[' && line[3] == ':' && line[6] == '.') {
-          uint32_t mins = line.substring(1, 3).toInt();
-          uint32_t secs = line.substring(4, 6).toInt();
-          uint32_t hund = line.substring(7, 9).toInt();
-          
-          lyrics[numLyrics].timeMs = (mins * 60000) + (secs * 1000) + (hund * 10);
-          
-          // Find where the brackets end
-          int endBracket = line.indexOf(']');
-          if (endBracket != -1 && endBracket < line.length() - 1) {
-             String txt = line.substring(endBracket + 1);
-             txt.trim();
-             lyrics[numLyrics].text = txt;
-          } else {
-             lyrics[numLyrics].text = "";
-          }
-          numLyrics++;
-        }
-        pos = nextLine + 1;
-      }
-      strcpy(spotify.currentLyric1, "♪ Lyrics Synced ♪");
-      strcpy(spotify.currentLyric2, "");
+
+  if (WiFi.status() != WL_CONNECTED) {
+    xSemaphoreTake(uiMutex, portMAX_DELAY);
+    strcpy(spotify.currentLyric1, "No WiFi");
+    strcpy(spotify.currentLyric2, "");
+    xSemaphoreGive(uiMutex);
+    return;
+  }
+
+  String cleanTitle = cleanTrackTitle(track);
+  String cleanArtist = cleanArtistName(artist);
+  uint32_t durationSec = durationMs / 1000;
+
+  bool isInstrumental = false;
+  bool found = false;
+  String responseBody;
+
+  // 1. Exact match with duration (if duration between 1 and 3600s per LRCLIB docs)
+  if (durationSec > 0 && durationSec <= 3600) {
+    String url = "https://lrclib.net/api/get?track_name=" + urlEncode(track) +
+                 "&artist_name=" + urlEncode(artist) +
+                 "&duration=" + String(durationSec);
+    int code = executeLrclibGet(url, responseBody);
+    if (code == 200) {
+      found = parseGetResult(responseBody, isInstrumental);
     }
-  } else if (httpCode == 404) {
-    strcpy(spotify.currentLyric1, "Lyrics not found");
+  }
+
+  // 2. Exact match without duration
+  if (!found && !isInstrumental) {
+    delay(200); // 200ms spacing per rate-limit guidelines
+    String url = "https://lrclib.net/api/get?track_name=" + urlEncode(track) +
+                 "&artist_name=" + urlEncode(artist);
+    int code = executeLrclibGet(url, responseBody);
+    if (code == 200) {
+      found = parseGetResult(responseBody, isInstrumental);
+    }
+  }
+
+  // 3. Cleaned title match (if different from raw title)
+  if (!found && !isInstrumental && (cleanTitle != track || cleanArtist != artist)) {
+    delay(200);
+    String url = "https://lrclib.net/api/get?track_name=" + urlEncode(cleanTitle) +
+                 "&artist_name=" + urlEncode(cleanArtist);
+    if (durationSec > 0 && durationSec <= 3600) {
+      url += "&duration=" + String(durationSec);
+    }
+    int code = executeLrclibGet(url, responseBody);
+    if (code == 200) {
+      found = parseGetResult(responseBody, isInstrumental);
+    }
+  }
+
+  // 4. Structured search fallback
+  if (!found && !isInstrumental) {
+    delay(200);
+    String searchTitle = (cleanTitle.length() > 0) ? cleanTitle : track;
+    String searchArtist = (cleanArtist.length() > 0) ? cleanArtist : artist;
+    String url = "https://lrclib.net/api/search?track_name=" + urlEncode(searchTitle) +
+                 "&artist_name=" + urlEncode(searchArtist);
+    int code = executeLrclibGet(url, responseBody);
+    if (code == 200) {
+      found = parseSearchResult(responseBody, durationSec, isInstrumental);
+    }
+  }
+
+  // 5. Query string search fallback (q=)
+  if (!found && !isInstrumental) {
+    delay(200);
+    String q = cleanTitle + " " + cleanArtist;
+    q.trim();
+    if (q.length() > 0) {
+      String url = "https://lrclib.net/api/search?q=" + urlEncode(q);
+      int code = executeLrclibGet(url, responseBody);
+      if (code == 200) {
+        found = parseSearchResult(responseBody, durationSec, isInstrumental);
+      }
+    }
+  }
+
+  // Update UI state with results safely
+  xSemaphoreTake(uiMutex, portMAX_DELAY);
+  if (isInstrumental) {
+    strcpy(spotify.currentLyric1, "♪ Instrumental ♪");
+    strcpy(spotify.currentLyric2, "");
+  } else if (found && numLyrics > 0) {
+    strcpy(spotify.currentLyric1, "♪ Lyrics Synced ♪");
     strcpy(spotify.currentLyric2, "");
   } else {
-    sprintf(spotify.currentLyric1, "API Error: %d", httpCode);
+    strcpy(spotify.currentLyric1, "Lyrics not found");
     strcpy(spotify.currentLyric2, "");
   }
-  http.end();
+  xSemaphoreGive(uiMutex);
 }
 
 void triggerLyricChange(String newText) {
   String l1, l2;
-  splitLyric(newText, l1, l2);
-  
+  if (newText.length() > 0) {
+    splitLyric(newText, l1, l2);
+  } else {
+    l1 = "";
+    l2 = "";
+  }
+
   xSemaphoreTake(uiMutex, portMAX_DELAY);
   if (String(spotify.currentLyric1) != l1 || String(spotify.currentLyric2) != l2) {
      if (!isFadingLyric) {
@@ -617,17 +922,17 @@ void triggerLyricChange(String newText) {
 
 void updateSyncedLyric() {
   if (numLyrics == 0) return;
-  
-  // Advance lyrics by 1000ms (1 second earlier)
-  uint32_t adjMs = spotify.progressMs + 1000;
-  
+
+  // Natural lead time (500ms) for display anticipation
+  uint32_t adjMs = spotify.progressMs + 500;
+
+  if (adjMs < lyrics[0].timeMs) {
+    triggerLyricChange("");
+    return;
+  }
+
   int matchedIndex = -1;
   for (int i = 0; i < numLyrics; i++) {
-    if (i == 0 && adjMs < lyrics[0].timeMs) {
-      triggerLyricChange("");
-      return;
-    }
-    
     if (lyrics[i].timeMs <= adjMs) {
       if (i == numLyrics - 1 || lyrics[i + 1].timeMs > adjMs) {
         matchedIndex = i;
@@ -635,9 +940,9 @@ void updateSyncedLyric() {
       }
     }
   }
-  
-  if (matchedIndex != -1 && lyrics[matchedIndex].text.length() > 0) {
-     triggerLyricChange(lyrics[matchedIndex].text);
+
+  if (matchedIndex != -1) {
+    triggerLyricChange(lyrics[matchedIndex].text);
   }
 }
 
@@ -740,6 +1045,8 @@ void pollSpotifyAPI() {
   bool pendingFetch = false;
   String pendingTitle = "";
   String pendingArtist = "";
+  String pendingAlbum = "";
+  uint32_t pendingDurationMs = 0;
   String pendingCoverUrl = "";
   int httpCode = 0;
   
@@ -768,6 +1075,7 @@ void pollSpotifyAPI() {
       filter["progress_ms"] = true;
       filter["item"]["name"] = true;
       filter["item"]["artists"][0]["name"] = true;
+      filter["item"]["album"]["name"] = true;
       filter["item"]["duration_ms"] = true;
       filter["item"]["album"]["images"][0]["url"] = true;
       filter["item"]["album"]["images"][2]["url"] = true;
@@ -791,6 +1099,7 @@ void pollSpotifyAPI() {
         } else {
           String title = doc["item"]["name"].as<String>();
           String artist = doc["item"]["artists"][0]["name"].as<String>();
+          String album = doc["item"]["album"]["name"].as<String>();
           
           strncpy(spotify.title, title.c_str(), sizeof(spotify.title)-1);
           spotify.title[sizeof(spotify.title)-1] = '\0';
@@ -810,6 +1119,8 @@ void pollSpotifyAPI() {
           if (title != currentTrackForLyrics) {
             pendingTitle = title;
             pendingArtist = artist;
+            pendingAlbum = album;
+            pendingDurationMs = spotify.durationMs;
             pendingCoverUrl = doc["item"]["album"]["images"][2]["url"].as<String>();
             if (pendingCoverUrl == "null" || pendingCoverUrl.length() < 5) {
                pendingCoverUrl = doc["item"]["album"]["images"][0]["url"].as<String>();
@@ -879,7 +1190,7 @@ void pollSpotifyAPI() {
     memset(albumArt, 0, sizeof(albumArt));
     
     fetchAlbumArt(pendingCoverUrl);
-    fetchLyrics(pendingTitle, pendingArtist);
+    fetchLyrics(pendingTitle, pendingArtist, pendingAlbum, pendingDurationMs);
   }
   
   if (httpCode == 200 && pendingFetch == false) {
