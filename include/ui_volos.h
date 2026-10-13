@@ -131,41 +131,126 @@ if (d.durationMs > 0) {
     return count;
   };
 
-  // Draws one logical lyric line: largest font that fits on one row, or wraps
-  // (centering every row via drawString) if it's still too wide at Font 1.
-  // Returns the y just below what it drew, so line 2 can stack under line 1
-  // instead of using a fixed offset that could collide with wrapped rows.
-  auto drawLyricLine = [&](const char* text, int yPos) -> int {
+  auto splitWords = [](const char* text, String wordsOut[], int maxWords) -> int {
+    int count = 0;
+    int start = 0;
+    int len = strlen(text);
+    while (start < len && count < maxWords) {
+      while (start < len && text[start] == ' ') start++;
+      if (start >= len) break;
+      int end = start;
+      while (end < len && text[end] != ' ') end++;
+      wordsOut[count++] = String(text).substring(start, end);
+      start = end + 1;
+    }
+    return count;
+  };
+
+  // Draws one logical lyric line: highlights the currently pronouncing word in GREEN!
+  auto drawLyricLine = [&](const char* text, int yPos, int activeWordIdx) -> int {
     if (strlen(text) == 0) return yPos;
+
+    uint16_t greenColor = blendColor(C_GREEN, C_BG, d.lyricAlpha);
+    uint16_t normalColor = blendColor(C_TEXT, C_BG, d.lyricAlpha);
+
+    // If it's a special status message or no word is active, draw normally
+    if (text[0] == 0xC2 || text[0] == 0xE2 || activeWordIdx < 0 ||
+        strncmp(text, "Searching", 9) == 0 || strncmp(text, "Lyrics", 6) == 0) {
+      sprite.setTextColor(normalColor);
+      sprite.setTextFont(2);
+      if (sprite.textWidth(text) > LYRIC_MAX_W) {
+        sprite.setTextFont(1);
+      }
+      int rowHeight = sprite.fontHeight() + 2;
+      if (sprite.textWidth(text) <= LYRIC_MAX_W) {
+        sprite.setTextDatum(TC_DATUM);
+        sprite.drawString(text, 64, yPos);
+        return yPos + rowHeight;
+      }
+      String rows[3];
+      int rowCount = wrapLyric(text, rows, 3);
+      for (int i = 0; i < rowCount; i++) {
+        sprite.setTextDatum(TC_DATUM);
+        sprite.drawString(rows[i], 64, yPos + i * rowHeight);
+      }
+      return yPos + rowCount * rowHeight;
+    }
+
+    String words[16];
+    int numWords = splitWords(text, words, 16);
+    if (numWords == 0) return yPos;
 
     sprite.setTextFont(2);
     if (sprite.textWidth(text) > LYRIC_MAX_W) {
       sprite.setTextFont(1);
     }
-
     int rowHeight = sprite.fontHeight() + 2;
+    int spaceW = sprite.textWidth(" ");
+
+    auto drawWordRow = [&](String rowWords[], int wordCount, int rowStartWordIdx, int y) {
+      int totalW = 0;
+      for (int i = 0; i < wordCount; i++) {
+        totalW += sprite.textWidth(rowWords[i]);
+        if (i < wordCount - 1) totalW += spaceW;
+      }
+      int curX = 64 - (totalW / 2);
+      sprite.setTextDatum(TL_DATUM);
+      for (int i = 0; i < wordCount; i++) {
+        int globalIdx = rowStartWordIdx + i;
+        if (globalIdx == activeWordIdx) {
+          sprite.setTextColor(greenColor);
+        } else {
+          sprite.setTextColor(normalColor);
+        }
+        sprite.drawString(rowWords[i], curX, y);
+        curX += sprite.textWidth(rowWords[i]) + spaceW;
+      }
+      sprite.setTextDatum(TC_DATUM);
+    };
 
     if (sprite.textWidth(text) <= LYRIC_MAX_W) {
-      sprite.drawString(text, 64, yPos);
+      drawWordRow(words, numWords, 0, yPos);
       return yPos + rowHeight;
     }
 
-    // Still too wide at Font 1 -> wrap into up to 3 centered rows
-    String rows[3];
-    int rowCount = wrapLyric(text, rows, 3);
-    for (int i = 0; i < rowCount; i++) {
-      sprite.drawString(rows[i], 64, yPos + i * rowHeight);
+    // Wrap into multiple rows by words
+    String rowWords[8];
+    int rowWordCount = 0;
+    int rowStartIdx = 0;
+    int curY = yPos;
+    int curRowW = 0;
+
+    for (int i = 0; i < numWords; i++) {
+      int wWidth = sprite.textWidth(words[i]);
+      int addedW = (rowWordCount > 0) ? (spaceW + wWidth) : wWidth;
+
+      if (rowWordCount > 0 && curRowW + addedW > LYRIC_MAX_W) {
+        drawWordRow(rowWords, rowWordCount, rowStartIdx, curY);
+        curY += rowHeight;
+        rowStartIdx = i;
+        rowWordCount = 0;
+        curRowW = 0;
+      }
+
+      rowWords[rowWordCount++] = words[i];
+      curRowW += (rowWordCount == 1) ? wWidth : (spaceW + wWidth);
     }
-    return yPos + rowCount * rowHeight;
+
+    if (rowWordCount > 0) {
+      drawWordRow(rowWords, rowWordCount, rowStartIdx, curY);
+      curY += rowHeight;
+    }
+
+    return curY;
   };
 
   // Render the layout - line 2 starts wherever line 1 actually ended
   if (d.isPlaying) {
     if (strlen(d.currentLyric2) > 0) {
-      int nextY = drawLyricLine(d.currentLyric1, 82);
-      drawLyricLine(d.currentLyric2, nextY);
+      int nextY = drawLyricLine(d.currentLyric1, 82, d.activeWordIdx1);
+      drawLyricLine(d.currentLyric2, nextY, d.activeWordIdx2);
     } else {
-      drawLyricLine(d.currentLyric1, 92); // Centered if only one line
+      drawLyricLine(d.currentLyric1, 92, d.activeWordIdx1); // Centered if only one line
     }
   }
   // Progress Bar

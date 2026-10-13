@@ -920,14 +920,110 @@ void triggerLyricChange(String newText) {
   xSemaphoreGive(uiMutex);
 }
 
-void updateSyncedLyric() {
-  if (numLyrics == 0) return;
+int splitWordsHelper(const String& str, String wordsOut[], int maxWords) {
+  int count = 0;
+  int start = 0;
+  int len = str.length();
+  while (start < len && count < maxWords) {
+    while (start < len && str[start] == ' ') start++;
+    if (start >= len) break;
+    int end = str.indexOf(' ', start);
+    if (end == -1) end = len;
+    wordsOut[count++] = str.substring(start, end);
+    start = end + 1;
+  }
+  return count;
+}
 
-  // Natural lead time (500ms) for display anticipation
-  uint32_t adjMs = spotify.progressMs + 500;
+void computeActiveWord(const String& fullText, uint32_t elapsed, uint32_t duration) {
+  String l1, l2;
+  splitLyric(fullText, l1, l2);
+
+  String w1[16];
+  int count1 = splitWordsHelper(l1, w1, 16);
+  String w2[16];
+  int count2 = splitWordsHelper(l2, w2, 16);
+
+  int totalWords = count1 + count2;
+  if (totalWords == 0 || duration == 0) {
+    xSemaphoreTake(uiMutex, portMAX_DELAY);
+    spotify.activeWordIdx1 = -1;
+    spotify.activeWordIdx2 = -1;
+    xSemaphoreGive(uiMutex);
+    return;
+  }
+
+  // Length-weighted timing (longer words get proportionally more time)
+  int weights[32];
+  int totalWeight = 0;
+  for (int i = 0; i < count1; i++) {
+    int w = w1[i].length();
+    if (w < 2) w = 2;
+    weights[i] = w;
+    totalWeight += w;
+  }
+  for (int i = 0; i < count2; i++) {
+    int w = w2[i].length();
+    if (w < 2) w = 2;
+    weights[count1 + i] = w;
+    totalWeight += w;
+  }
+
+  // Active singing duration estimation
+  uint32_t estSingingMs = totalWords * 380;
+  if (estSingingMs < 1200) estSingingMs = 1200;
+  uint32_t activeDuration = (duration < estSingingMs) ? duration : estSingingMs;
+
+  int idx1 = -1;
+  int idx2 = -1;
+
+  if (elapsed < activeDuration) {
+    int currentWeightPos = (elapsed * totalWeight) / activeDuration;
+    if (currentWeightPos >= totalWeight) currentWeightPos = totalWeight - 1;
+
+    int activeGlobalIdx = 0;
+    int accumWeight = 0;
+    for (int i = 0; i < totalWords; i++) {
+      accumWeight += weights[i];
+      if (currentWeightPos < accumWeight) {
+        activeGlobalIdx = i;
+        break;
+      }
+    }
+
+    if (activeGlobalIdx < count1) {
+      idx1 = activeGlobalIdx;
+      idx2 = -1;
+    } else {
+      idx1 = -1;
+      idx2 = activeGlobalIdx - count1;
+    }
+  }
+
+  xSemaphoreTake(uiMutex, portMAX_DELAY);
+  spotify.activeWordIdx1 = idx1;
+  spotify.activeWordIdx2 = idx2;
+  xSemaphoreGive(uiMutex);
+}
+
+void updateSyncedLyric() {
+  if (numLyrics == 0) {
+    xSemaphoreTake(uiMutex, portMAX_DELAY);
+    spotify.activeWordIdx1 = -1;
+    spotify.activeWordIdx2 = -1;
+    xSemaphoreGive(uiMutex);
+    return;
+  }
+
+  // Natural lead time (250ms) for display anticipation
+  uint32_t adjMs = spotify.progressMs + 250;
 
   if (adjMs < lyrics[0].timeMs) {
     triggerLyricChange("");
+    xSemaphoreTake(uiMutex, portMAX_DELAY);
+    spotify.activeWordIdx1 = -1;
+    spotify.activeWordIdx2 = -1;
+    xSemaphoreGive(uiMutex);
     return;
   }
 
@@ -942,7 +1038,24 @@ void updateSyncedLyric() {
   }
 
   if (matchedIndex != -1) {
-    triggerLyricChange(lyrics[matchedIndex].text);
+    String lineText = lyrics[matchedIndex].text;
+    triggerLyricChange(lineText);
+
+    if (lineText.length() > 0) {
+      uint32_t lineStart = lyrics[matchedIndex].timeMs;
+      uint32_t lineEnd = (matchedIndex < numLyrics - 1) ? lyrics[matchedIndex + 1].timeMs : (lineStart + 4000);
+      uint32_t lineDuration = (lineEnd > lineStart) ? (lineEnd - lineStart) : 3000;
+      if (lineDuration > 6000) lineDuration = 6000;
+      if (lineDuration < 800) lineDuration = 800;
+
+      uint32_t elapsed = (adjMs >= lineStart) ? (adjMs - lineStart) : 0;
+      computeActiveWord(lineText, elapsed, lineDuration);
+    } else {
+      xSemaphoreTake(uiMutex, portMAX_DELAY);
+      spotify.activeWordIdx1 = -1;
+      spotify.activeWordIdx2 = -1;
+      xSemaphoreGive(uiMutex);
+    }
   }
 }
 
